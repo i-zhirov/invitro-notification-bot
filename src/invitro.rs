@@ -202,6 +202,7 @@ pub struct DoctorSpecialty {
 #[derive(Debug, Clone, Deserialize)]
 pub struct OfficeEntry {
     pub office: OfficeInfo,
+    pub main_service_id: String,
     #[serde(default)]
     pub services: Vec<Service>,
 }
@@ -280,7 +281,8 @@ impl InvitroClient {
     /// Resolve doctor + city + specialty + offices/services into poll targets.
     ///
     /// Only offices belonging to `city_slug` are kept. `service_ids` (if non-empty)
-    /// selects exact services; otherwise all consultation services are watched.
+    /// selects exact services; otherwise the doctor's main service at each office
+    /// is watched (the one used by the site's booking flow).
     pub async fn resolve_target(
         &self,
         bitrix_id: u64,
@@ -327,13 +329,26 @@ impl InvitroClient {
                 continue;
             }
 
+            // By default watch only the main service — the one the site's
+            // "Записаться" flow uses (and what the doctor page shows), so the
+            // user gets one message per office instead of near-duplicates for
+            // every consultation service.
             let selected: Vec<&Service> = if service_ids.is_empty() {
-                let consult: Vec<&Service> =
-                    off.services.iter().filter(|s| s.is_consultation).collect();
-                if consult.is_empty() {
-                    off.services.iter().collect()
+                let main: Vec<&Service> = off
+                    .services
+                    .iter()
+                    .filter(|s| s.service_id == off.main_service_id)
+                    .collect();
+                if !main.is_empty() {
+                    main
                 } else {
-                    consult
+                    let consult: Vec<&Service> =
+                        off.services.iter().filter(|s| s.is_consultation).collect();
+                    if consult.is_empty() {
+                        off.services.iter().collect()
+                    } else {
+                        consult
+                    }
                 }
             } else {
                 off.services

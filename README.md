@@ -42,7 +42,7 @@ in a state file, so restarts never re-notify.
 | `INVITRO_DOCTOR_BITRIX_ID` | `19143` | Numeric doctor id from the page URL |
 | `INVITRO_CITY_SLUG` | `kurgan` | City slug from the page URL |
 | `INVITRO_SPECIALTY_SLUG` | (primary) | Specialty slug to watch, e.g. `ginekolog` |
-| `INVITRO_SERVICE_IDS` | (all consultations) | Comma-separated service UUIDs; if empty, all `is_consultation` services are watched |
+| `INVITRO_SERVICE_IDS` | (main service) | Comma-separated service UUIDs; if empty, only the doctor's main service (the one used by the "Записаться" flow) is watched — one notification per office |
 | `INVITRO_POLL_INTERVAL_SECS` | `120` | Seconds between polls |
 | `INVITRO_STATE_FILE` | `state.json` | Path of the de-duplication state file |
 | `INVITRO_NOTIFY_ON_FIRST_RUN` | `1` | `1` = notify about currently open slots on the first poll; `0` = record them as baseline silently |

@@ -54,8 +54,8 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       description = ''
-        Service UUIDs to watch. If empty, all consultation services of the
-        doctor in the target city are watched.
+        Service UUIDs to watch. If empty, the doctor's main service at each
+        office (the one used by the site's booking flow) is watched.
       '';
     };
 
