@@ -87,7 +87,7 @@ The repository is a flake and ships a NixOS module.
 ```nix
 # configuration.nix
 {
-  inputs.invitro-notification-bot.url = "github:<you>/invitro-notification-bot";
+  inputs.invitro-notification-bot.url = "github:i-zhirov/invitro-notification-bot";
 
   services.invitroBot = {
     enable = true;
