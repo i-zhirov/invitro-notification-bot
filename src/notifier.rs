@@ -86,9 +86,6 @@ fn format_messages(
         // Start a new message if this line does not fit; always keep the header
         // on subsequent chunks with a "(продолжение)" marker.
         if current.len() + line.len() > MAX_MESSAGE_CHARS {
-            if let Some(stripped) = current.strip_suffix('\n') {
-                current = stripped.to_string();
-            }
             current.push_str(&format!("🔗 {link}"));
             messages.push(current);
             current = String::with_capacity(MAX_MESSAGE_CHARS + 128);
@@ -98,9 +95,6 @@ fn format_messages(
         current.push_str(&line);
     }
 
-    if let Some(stripped) = current.strip_suffix('\n') {
-        current = stripped.to_string();
-    }
     current.push_str(&format!("🔗 {link}"));
     messages.push(current);
     messages
@@ -164,6 +158,8 @@ mod tests {
         assert!(msg.contains("📅 2026-10-05: 10:00, 13:00"));
         assert!(msg.contains("📅 2026-10-06: 09:30"));
         assert!(msg.contains("3500.00"));
+        assert!(msg.contains("\n🔗 https://www.invitro.ru/kurgan/vrachi/ginekolog/19143/"));
+        assert!(msg.ends_with("19143/"));
         assert!(!msg.contains("vrachi/vrachi"));
     }
 
