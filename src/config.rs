@@ -12,8 +12,8 @@ use anyhow::{Context, Result};
 /// - `INVITRO_DOCTOR_BITRIX_ID` — numeric doctor id from the page URL (default: 19143)
 /// - `INVITRO_CITY_SLUG` — city slug from the page URL (default: kurgan)
 /// - `INVITRO_SPECIALTY_SLUG` — specialty to watch (default: primary one)
-/// - `INVITRO_SERVICE_IDS` — comma-separated service UUIDs to watch; default: all
-///   consultation services (`is_consultation == true`) of the doctor in the city
+/// - `INVITRO_SERVICE_IDS` — comma-separated service UUIDs to watch; default: the
+///   doctor's main service (the one used by the site's booking flow)
 /// - `INVITRO_POLL_INTERVAL_SECS` — seconds between polls (default: 120)
 /// - `INVITRO_STATE_FILE` — path of the JSON state file (default: ./state.json)
 /// - `INVITRO_NOTIFY_ON_FIRST_RUN` — if `1`, notify about slots available on the very
@@ -35,11 +35,7 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self> {
         let telegram_bot_token = env_req("INVITRO_TELEGRAM_BOT_TOKEN")?;
-        let telegram_chat_ids: Vec<String> = env_req("INVITRO_TELEGRAM_CHAT_ID")?
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
+        let telegram_chat_ids = parse_chat_ids(&env_req("INVITRO_TELEGRAM_CHAT_ID")?)?;
         if telegram_chat_ids.is_empty() {
             anyhow::bail!("INVITRO_TELEGRAM_CHAT_ID must contain at least one chat id");
         }
@@ -82,4 +78,71 @@ fn env_or(key: &str, default: &str) -> String {
 
 fn env_opt(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
+}
+
+/// Parse a comma-separated list of Telegram chat ids (e.g. `"123,-100456"`).
+///
+/// Entries are trimmed; empty entries (e.g. from double commas) are skipped.
+/// An entry that is not an integer is rejected with an error.
+fn parse_chat_ids(raw: &str) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for part in raw.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if part.parse::<i64>().is_err() {
+            anyhow::bail!("invalid Telegram chat id: '{part}'");
+        }
+        out.push(part.to_string());
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_multiple_ids() {
+        assert_eq!(
+            parse_chat_ids("733839622,450097973").unwrap(),
+            vec!["733839622", "450097973"]
+        );
+    }
+
+    #[test]
+    fn trims_whitespace_and_skips_empty_entries() {
+        assert_eq!(
+            parse_chat_ids(" 733839622 , , 450097973 ").unwrap(),
+            vec!["733839622", "450097973"]
+        );
+        assert_eq!(
+            parse_chat_ids("733839622,,450097973").unwrap(),
+            vec!["733839622", "450097973"]
+        );
+    }
+
+    #[test]
+    fn parses_single_and_group_ids() {
+        assert_eq!(parse_chat_ids("733839622").unwrap(), vec!["733839622"]);
+        assert_eq!(
+            parse_chat_ids("-1001234567890").unwrap(),
+            vec!["-1001234567890"]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_entries() {
+        assert!(parse_chat_ids("123,abc").is_err());
+        assert!(parse_chat_ids("12a").is_err());
+        assert!(parse_chat_ids("123, 45.6").is_err());
+        assert!(parse_chat_ids("123,456,").is_ok()); // trailing comma is just an empty entry
+    }
+
+    #[test]
+    fn empty_input_yields_empty_list() {
+        assert!(parse_chat_ids("").unwrap().is_empty());
+        assert!(parse_chat_ids(" , , ").unwrap().is_empty());
+    }
 }
