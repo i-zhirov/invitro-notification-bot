@@ -37,7 +37,7 @@ in a state file, so restarts never re-notify.
 | Variable | Default | Description |
 |---|---|---|
 | `INVITRO_TELEGRAM_BOT_TOKEN` | — (required) | Bot token from [@BotFather](https://t.me/BotFather) |
-| `INVITRO_TELEGRAM_CHAT_ID` | — (required) | Chat/group id to send notifications to |
+| `INVITRO_TELEGRAM_CHAT_ID` | — (required) | Comma-separated chat ids to send notifications to, e.g. `733839622,450097973` |
 | `INVITRO_DRY_RUN` | `0` | `1` = print notifications to stdout instead of sending |
 | `INVITRO_DOCTOR_BITRIX_ID` | `19143` | Numeric doctor id from the page URL |
 | `INVITRO_CITY_SLUG` | `kurgan` | City slug from the page URL |
@@ -76,9 +76,10 @@ INVITRO_TELEGRAM_CHAT_ID=456 \
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
 2. Find your chat id: message your bot, then run
-   `curl "https://api.telegram.org/bot<TOKEN>/getUpdates"` and read the `chat.id`
-   (for private chats it is usually a negative-free numeric id; for groups the id
-   starts with `-100`).
+   `scripts/get-chat-id.sh` (prints the most recent chat id) or
+   `scripts/get-chat-id.sh --all` (prints all chat ids, one per line).
+   For a group chat the id starts with `-100`. Multiple recipients are
+   configured as a comma-separated `INVITRO_TELEGRAM_CHAT_ID`.
 
 ## Deployment on NixOS
 

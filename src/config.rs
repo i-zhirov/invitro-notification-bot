@@ -6,7 +6,8 @@ use anyhow::{Context, Result};
 ///
 /// All variables use the `INVITRO_` prefix:
 /// - `INVITRO_TELEGRAM_BOT_TOKEN` (required) — Telegram bot token from @BotFather
-/// - `INVITRO_TELEGRAM_CHAT_ID` (required) — chat id to send notifications to
+/// - `INVITRO_TELEGRAM_CHAT_ID` (required) — comma-separated chat ids to send
+///   notifications to (e.g. `123,-100456`)
 /// - `INVITRO_DRY_RUN` — if `1`, print notifications to stdout instead of sending (default: 0)
 /// - `INVITRO_DOCTOR_BITRIX_ID` — numeric doctor id from the page URL (default: 19143)
 /// - `INVITRO_CITY_SLUG` — city slug from the page URL (default: kurgan)
@@ -20,7 +21,7 @@ use anyhow::{Context, Result};
 #[derive(Debug, Clone)]
 pub struct Config {
     pub telegram_bot_token: String,
-    pub telegram_chat_id: String,
+    pub telegram_chat_ids: Vec<String>,
     pub dry_run: bool,
     pub doctor_bitrix_id: u64,
     pub city_slug: String,
@@ -34,7 +35,14 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self> {
         let telegram_bot_token = env_req("INVITRO_TELEGRAM_BOT_TOKEN")?;
-        let telegram_chat_id = env_req("INVITRO_TELEGRAM_CHAT_ID")?;
+        let telegram_chat_ids: Vec<String> = env_req("INVITRO_TELEGRAM_CHAT_ID")?
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if telegram_chat_ids.is_empty() {
+            anyhow::bail!("INVITRO_TELEGRAM_CHAT_ID must contain at least one chat id");
+        }
 
         let doctor_bitrix_id = env_or("INVITRO_DOCTOR_BITRIX_ID", "19143")
             .parse()
@@ -51,7 +59,7 @@ impl Config {
 
         Ok(Config {
             telegram_bot_token,
-            telegram_chat_id,
+            telegram_chat_ids,
             dry_run: env_or("INVITRO_DRY_RUN", "0") == "1",
             doctor_bitrix_id,
             city_slug: env_or("INVITRO_CITY_SLUG", "kurgan"),

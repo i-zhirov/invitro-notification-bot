@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     );
 
     let telegram =
-        telegram::Telegram::new(&cfg.telegram_bot_token, &cfg.telegram_chat_id, cfg.dry_run)?;
+        telegram::Telegram::new(&cfg.telegram_bot_token, &cfg.telegram_chat_ids, cfg.dry_run)?;
     let mut seen = SeenSlots::load(&cfg.state_file)?;
     if !seen.existed_before() {
         info!("no state file yet, first run");

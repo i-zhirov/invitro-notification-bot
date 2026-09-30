@@ -6,52 +6,57 @@ use serde::Serialize;
 pub struct Telegram {
     http: reqwest::Client,
     token: String,
-    chat_id: String,
+    chat_ids: Vec<String>,
     dry_run: bool,
 }
 
 impl Telegram {
-    pub fn new(token: &str, chat_id: &str, dry_run: bool) -> Result<Self> {
+    pub fn new(token: &str, chat_ids: &[String], dry_run: bool) -> Result<Self> {
+        if chat_ids.is_empty() {
+            anyhow::bail!("no Telegram chat ids configured");
+        }
         let http = reqwest::Client::builder()
             .build()
             .context("failed to build HTTP client")?;
         Ok(Telegram {
             http,
             token: token.to_string(),
-            chat_id: chat_id.to_string(),
+            chat_ids: chat_ids.to_vec(),
             dry_run,
         })
     }
 
+    /// Send the same message to every configured chat id.
     pub async fn send(&self, text: &str) -> Result<()> {
-        if self.dry_run {
-            println!("=== DRY RUN: would send to {} ===\n{text}\n", self.chat_id);
-            return Ok(());
-        }
+        for chat_id in &self.chat_ids {
+            if self.dry_run {
+                println!("=== DRY RUN: would send to {chat_id} ===\n{text}\n");
+                continue;
+            }
+            let url = format!("https://api.telegram.org/bot{}/sendMessage", self.token);
+            let body = SendMessage {
+                chat_id: chat_id.clone(),
+                text: text.to_string(),
+                parse_mode: "HTML",
+                disable_web_page_preview: true,
+            };
 
-        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.token);
-        let body = SendMessage {
-            chat_id: self.chat_id.clone(),
-            text: text.to_string(),
-            parse_mode: "HTML",
-            disable_web_page_preview: true,
-        };
+            let resp = self
+                .http
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .with_context(|| format!("Telegram request failed (chat {chat_id})"))?;
 
-        let resp = self
-            .http
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .with_context(|| "Telegram request failed")?;
-
-        let status = resp.status();
-        let text_resp = resp.text().await.unwrap_or_default();
-        if !status.is_success() {
-            anyhow::bail!(
-                "Telegram -> HTTP {status}: {}",
-                &text_resp.chars().take(300).collect::<String>()
-            );
+            let status = resp.status();
+            let text_resp = resp.text().await.unwrap_or_default();
+            if !status.is_success() {
+                anyhow::bail!(
+                    "Telegram -> HTTP {status} (chat {chat_id}): {}",
+                    &text_resp.chars().take(300).collect::<String>()
+                );
+            }
         }
         Ok(())
     }
