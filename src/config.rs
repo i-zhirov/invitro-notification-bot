@@ -10,6 +10,8 @@ use anyhow::{Context, Result};
 ///   notifications to (e.g. `123,-100456`)
 /// - `INVITRO_DRY_RUN` — if `1`, print notifications to stdout instead of sending (default: 0)
 /// - `INVITRO_DOCTOR_BITRIX_ID` — numeric doctor id from the page URL (default: 19143)
+/// - `INVITRO_DOCTOR_NAME` — alternatively, find the doctor by name (exact match
+///   preferred; ambiguous names are rejected)
 /// - `INVITRO_CITY_SLUG` — city slug from the page URL (default: kurgan)
 /// - `INVITRO_SPECIALTY_SLUG` — specialty to watch (default: primary one)
 /// - `INVITRO_SERVICE_IDS` — comma-separated service UUIDs to watch; default: the
@@ -24,6 +26,7 @@ pub struct Config {
     pub telegram_chat_ids: Vec<String>,
     pub dry_run: bool,
     pub doctor_bitrix_id: u64,
+    pub doctor_name: Option<String>,
     pub city_slug: String,
     pub specialty_slug: Option<String>,
     pub service_ids: Vec<String>,
@@ -58,6 +61,7 @@ impl Config {
             telegram_chat_ids,
             dry_run: env_or("INVITRO_DRY_RUN", "0") == "1",
             doctor_bitrix_id,
+            doctor_name: env_opt("INVITRO_DOCTOR_NAME"),
             city_slug: env_or("INVITRO_CITY_SLUG", "kurgan"),
             specialty_slug: env_opt("INVITRO_SPECIALTY_SLUG"),
             service_ids,

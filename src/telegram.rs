@@ -54,7 +54,7 @@ impl Telegram {
             if !status.is_success() {
                 anyhow::bail!(
                     "Telegram -> HTTP {status} (chat {chat_id}): {}",
-                    &text_resp.chars().take(300).collect::<String>()
+                    text_resp.chars().take(300).collect::<String>()
                 );
             }
         }

@@ -38,6 +38,12 @@ in
       description = "Numeric doctor id from the Invitro.ru page URL.";
     };
 
+    doctorName = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Alternative to doctorBitrixId: find the doctor by name. Exact full-name match is preferred; ambiguous names are rejected.";
+    };
+
     citySlug = lib.mkOption {
       type = lib.types.str;
       default = "kurgan";
@@ -96,7 +102,8 @@ in
           "INVITRO_POLL_INTERVAL_SECS=${toString cfg.pollIntervalSecs}"
           "INVITRO_STATE_FILE=/var/lib/invitro-bot/state.json"
           "INVITRO_NOTIFY_ON_FIRST_RUN=${if cfg.notifyOnFirstRun then "1" else "0"}"
-        ] ++ lib.optional (cfg.specialtySlug != null) "INVITRO_SPECIALTY_SLUG=${cfg.specialtySlug}"
+        ] ++ lib.optional (cfg.doctorName != null) "INVITRO_DOCTOR_NAME=${cfg.doctorName}"
+          ++ lib.optional (cfg.specialtySlug != null) "INVITRO_SPECIALTY_SLUG=${cfg.specialtySlug}"
           ++ lib.optional (cfg.serviceIds != []) "INVITRO_SERVICE_IDS=${lib.concatStringsSep "," cfg.serviceIds}"
           ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.extraEnvironment;
 

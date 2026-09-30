@@ -40,6 +40,7 @@ in a state file, so restarts never re-notify.
 | `INVITRO_TELEGRAM_CHAT_ID` | — (required) | Comma-separated chat ids to send notifications to, e.g. `733839622,450097973` |
 | `INVITRO_DRY_RUN` | `0` | `1` = print notifications to stdout instead of sending |
 | `INVITRO_DOCTOR_BITRIX_ID` | `19143` | Numeric doctor id from the page URL |
+| `INVITRO_DOCTOR_NAME` | — | Alternative to `INVITRO_DOCTOR_BITRIX_ID`: find the doctor by name (exact full-name match preferred; ambiguous names are rejected with the candidate list) |
 | `INVITRO_CITY_SLUG` | `kurgan` | City slug from the page URL |
 | `INVITRO_SPECIALTY_SLUG` | (primary) | Specialty slug to watch, e.g. `ginekolog` |
 | `INVITRO_SERVICE_IDS` | (main service) | Comma-separated service UUIDs; if empty, only the doctor's main service (the one used by the "Записаться" flow) is watched — one notification per office |
@@ -54,6 +55,11 @@ cargo build --release
 
 # Inspect what the bot will watch (no Telegram credentials required):
 ./target/release/invitro-bot --check
+
+# Find a doctor's booking page by name:
+./target/release/invitro-bot --find "Хохлова"
+# -> Хохлова Ольга Евгеньевна (bitrix_id=19143, ...)
+#    booking page: https://www.invitro.ru/kurgan/vrachi/ginekolog/19143
 
 # Run a single poll cycle (needs the two Telegram vars; use DRY_RUN=1 to test):
 INVITRO_DRY_RUN=1 \

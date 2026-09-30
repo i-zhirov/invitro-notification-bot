@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use serde_json::json;
 
 const BASE_URL: &str = "https://www.invitro.ru/golk";
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -48,6 +49,30 @@ impl InvitroClient {
             .with_context(|| format!("bad JSON from {url}: {}", truncate(&body, 200)))
     }
 
+    async fn post_json<T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+    ) -> Result<T> {
+        let url = format!("{BASE_URL}{path}");
+        let resp = self
+            .http
+            .post(&url)
+            .json(&body)
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .with_context(|| format!("request failed: {url}"))?;
+
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
+            anyhow::bail!("{url} -> HTTP {status}: {}", truncate(&body, 300));
+        }
+        serde_json::from_str(&body)
+            .with_context(|| format!("bad JSON from {url}: {}", truncate(&body, 200)))
+    }
+
     /// Map a numeric (bitrix) doctor id from the page URL to an internal UUID.
     pub async fn doctor_uuid(&self, bitrix_id: u64) -> Result<String> {
         let m: MapperResponse = self
@@ -68,6 +93,71 @@ impl InvitroClient {
             .or_else(|| r.cities.first())
             .cloned()
             .with_context(|| format!("city with slug '{slug}' not found"))
+    }
+
+    /// Search doctors in a city by name (case-insensitive, substring match).
+    ///
+    /// Uses the site's own search API, so doctors without current availability
+    /// are found as well. Returns an empty list when nothing matches.
+    pub async fn search_doctors(&self, city: &City, query: &str) -> Result<Vec<FoundDoctor>> {
+        let r: SearchResponse = self
+            .get(
+                "/search/api/v1/search/doctors",
+                &[("q", query), ("cityId", &city.id)],
+            )
+            .await?;
+        if r.ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let items: Vec<DoctorBatchItem> = self
+            .post_json("/doctors/api/v1/doctors/batch", json!({ "ids": r.ids }))
+            .await?;
+        Ok(items
+            .into_iter()
+            .map(|d| FoundDoctor {
+                uuid: d.id,
+                bitrix_id: d.bitrix_id,
+                full_name: format!("{} {} {}", d.last_name, d.first_name, d.middle_name),
+                specialty_slug: d.speciality_slug,
+                experience: d.experience,
+            })
+            .collect())
+    }
+
+    /// Pick a single doctor out of search results for a name query.
+    ///
+    /// Prefers an exact (normalized) full-name match; otherwise accepts a unique
+    /// result. Ambiguous queries are rejected with a list of candidates.
+    pub fn pick_doctor<'a>(doctors: &'a [FoundDoctor], query: &str) -> Result<&'a FoundDoctor> {
+        if doctors.is_empty() {
+            anyhow::bail!("no doctor found by name '{query}'");
+        }
+        let norm = normalize_name(query);
+        let exact: Vec<&FoundDoctor> = doctors
+            .iter()
+            .filter(|d| normalize_name(&d.full_name) == norm)
+            .collect();
+        if exact.len() == 1 {
+            return Ok(exact[0]);
+        }
+        if doctors.len() == 1 {
+            return Ok(&doctors[0]);
+        }
+        let list = doctors
+            .iter()
+            .map(|d| format!("  - {} (bitrix {})", d.full_name, d.bitrix_id))
+            .collect::<Vec<_>>()
+            .join("\n");
+        anyhow::bail!("ambiguous doctor name '{query}', matches:\n{list}")
+    }
+
+    /// Booking page URL of a doctor, e.g.
+    /// `https://www.invitro.ru/kurgan/vrachi/ginekolog/19143/`.
+    pub fn booking_page(city_slug: &str, doctor: &FoundDoctor) -> String {
+        format!(
+            "https://www.invitro.ru/{city_slug}/vrachi/{}/{}",
+            doctor.specialty_slug, doctor.bitrix_id
+        )
     }
 
     pub async fn doctor(&self, uuid: &str, city_id: &str) -> Result<Doctor> {
@@ -162,6 +252,35 @@ pub struct City {
 #[derive(Debug, Deserialize)]
 struct CitiesResponse {
     cities: Vec<City>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchResponse {
+    #[serde(default)]
+    ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DoctorBatchItem {
+    pub id: String,
+    pub bitrix_id: u64,
+    pub first_name: String,
+    pub middle_name: String,
+    pub last_name: String,
+    #[serde(default)]
+    pub speciality_slug: String,
+    #[serde(default)]
+    pub experience: u64,
+}
+
+/// A doctor found by name search, with enough data to build the booking page URL.
+#[derive(Debug, Clone)]
+pub struct FoundDoctor {
+    pub uuid: String,
+    pub bitrix_id: u64,
+    pub full_name: String,
+    pub specialty_slug: String,
+    pub experience: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -459,5 +578,76 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..n])
+    }
+}
+
+/// Normalize a name for comparison: lowercase and collapse whitespace.
+fn normalize_name(s: &str) -> String {
+    s.to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn found(bitrix: u64, name: &str) -> FoundDoctor {
+        FoundDoctor {
+            uuid: format!("uuid-{bitrix}"),
+            bitrix_id: bitrix,
+            full_name: name.to_string(),
+            specialty_slug: "ginekolog".into(),
+            experience: 10,
+        }
+    }
+
+    #[test]
+    fn pick_prefers_exact_full_name_match() {
+        let docs = vec![
+            found(1, "Коркина Ольга Владимировна"),
+            found(2, "Хохлова Ольга Евгеньевна"),
+        ];
+        let picked = InvitroClient::pick_doctor(&docs, "хохлова ольга евгеньевна").unwrap();
+        assert_eq!(picked.bitrix_id, 2);
+    }
+
+    #[test]
+    fn pick_accepts_unique_substring_match() {
+        let docs = vec![found(19143, "Хохлова Ольга Евгеньевна")];
+        let picked = InvitroClient::pick_doctor(&docs, "Хохлова").unwrap();
+        assert_eq!(picked.bitrix_id, 19143);
+    }
+
+    #[test]
+    fn pick_rejects_ambiguous_matches() {
+        let docs = vec![
+            found(1, "Коркина Ольга Владимировна"),
+            found(2, "Хохлова Ольга Евгеньевна"),
+        ];
+        let err = InvitroClient::pick_doctor(&docs, "Ольга")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("ambiguous"));
+        assert!(err.contains("Коркина"));
+        assert!(err.contains("Хохлова"));
+    }
+
+    #[test]
+    fn pick_rejects_empty() {
+        let err = InvitroClient::pick_doctor(&[], "никто")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no doctor found"));
+    }
+
+    #[test]
+    fn booking_page_uses_slug_and_bitrix_id() {
+        let d = found(19143, "Хохлова Ольга Евгеньевна");
+        assert_eq!(
+            InvitroClient::booking_page("kurgan", &d),
+            "https://www.invitro.ru/kurgan/vrachi/ginekolog/19143"
+        );
     }
 }

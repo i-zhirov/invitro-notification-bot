@@ -29,6 +29,11 @@ async fn main() -> Result<()> {
 
     let client = InvitroClient::new()?;
 
+    if let Some(pos) = args.iter().position(|a| a == "--find") {
+        let query = args[pos + 1..].join(" ");
+        return find_mode(&client, &query).await;
+    }
+
     if check {
         return check_mode(&client).await;
     }
@@ -69,15 +74,20 @@ async fn resolve_with_retry(client: &InvitroClient, cfg: &config::Config) -> Res
     let mut attempt = 0;
     loop {
         attempt += 1;
-        match client
-            .resolve_target(
-                cfg.doctor_bitrix_id,
-                &cfg.city_slug,
-                cfg.specialty_slug.as_deref(),
-                &cfg.service_ids,
-            )
-            .await
-        {
+        let result = match &cfg.doctor_name {
+            Some(name) => resolve_by_name(client, cfg, name).await,
+            None => {
+                client
+                    .resolve_target(
+                        cfg.doctor_bitrix_id,
+                        &cfg.city_slug,
+                        cfg.specialty_slug.as_deref(),
+                        &cfg.service_ids,
+                    )
+                    .await
+            }
+        };
+        match result {
             Ok(t) => return Ok(t),
             Err(e) if attempt < 5 => {
                 warn!("resolve attempt {attempt} failed: {e:#}; retrying in 30s");
@@ -86,6 +96,29 @@ async fn resolve_with_retry(client: &InvitroClient, cfg: &config::Config) -> Res
             Err(e) => return Err(e),
         }
     }
+}
+
+/// Resolve the doctor by name (INVITRO_DOCTOR_NAME) instead of a bitrix id.
+async fn resolve_by_name(
+    client: &InvitroClient,
+    cfg: &config::Config,
+    name: &str,
+) -> Result<WatchTarget> {
+    let city = client.city_by_slug(&cfg.city_slug).await?;
+    let doctors = client.search_doctors(&city, name).await?;
+    let doctor = InvitroClient::pick_doctor(&doctors, name)?;
+    info!(
+        "resolved doctor by name: {} (bitrix {})",
+        doctor.full_name, doctor.bitrix_id
+    );
+    client
+        .resolve_target(
+            doctor.bitrix_id,
+            &cfg.city_slug,
+            cfg.specialty_slug.as_deref(),
+            &cfg.service_ids,
+        )
+        .await
 }
 
 /// One poll cycle: fetch all available slots, notify about new ones, persist state.
@@ -131,6 +164,39 @@ async fn run_cycle(
     .await
 }
 
+/// `--find <name>`: search doctors in the city by name and print their booking
+/// pages (no Telegram credentials required). Exits with code 1 if nothing found.
+async fn find_mode(client: &InvitroClient, query: &str) -> Result<()> {
+    if query.is_empty() {
+        anyhow::bail!("usage: invitro-bot --find <doctor name>");
+    }
+    let city_slug = std::env::var("INVITRO_CITY_SLUG").unwrap_or_else(|_| "kurgan".into());
+    let city = client.city_by_slug(&city_slug).await?;
+    let doctors = client.search_doctors(&city, query).await?;
+
+    if doctors.is_empty() {
+        eprintln!("No doctors found for '{query}' in {}", city.name);
+        std::process::exit(1);
+    }
+
+    println!(
+        "Found {} doctor(s) for '{query}' in {}:",
+        doctors.len(),
+        city.name
+    );
+    for d in &doctors {
+        println!(
+            "\n{} (bitrix_id={}, uuid={}, стаж {} лет)\n  booking page: {}",
+            d.full_name,
+            d.bitrix_id,
+            d.uuid,
+            d.experience,
+            InvitroClient::booking_page(&city.slug, d)
+        );
+    }
+    Ok(())
+}
+
 /// `--check`: resolve and print the watch target (doctor, city, services) without
 /// polling or requiring Telegram credentials.
 async fn check_mode(client: &InvitroClient) -> Result<()> {
@@ -138,7 +204,10 @@ async fn check_mode(client: &InvitroClient) -> Result<()> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(19143);
-    let city = std::env::var("INVITRO_CITY_SLUG").unwrap_or_else(|_| "kurgan".into());
+    let city_slug = std::env::var("INVITRO_CITY_SLUG").unwrap_or_else(|_| "kurgan".into());
+    let doctor_name = std::env::var("INVITRO_DOCTOR_NAME")
+        .ok()
+        .filter(|s| !s.is_empty());
     let specialty = std::env::var("INVITRO_SPECIALTY_SLUG")
         .ok()
         .filter(|s| !s.is_empty());
@@ -149,15 +218,30 @@ async fn check_mode(client: &InvitroClient) -> Result<()> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let target = client
-        .resolve_target(bitrix, &city, specialty.as_deref(), &services)
-        .await
-        .context("failed to resolve doctor; check INVITRO_DOCTOR_BITRIX_ID / INVITRO_CITY_SLUG / INVITRO_SPECIALTY_SLUG")?;
+    let bitrix_id = if let Some(name) = &doctor_name {
+        let city = client.city_by_slug(&city_slug).await?;
+        let doctors = client.search_doctors(&city, name).await?;
+        let doctor = InvitroClient::pick_doctor(&doctors, name)?;
+        println!(
+            "Doctor:     {} (bitrix_id={}, resolved by name)",
+            doctor.full_name, doctor.bitrix_id
+        );
+        doctor.bitrix_id
+    } else {
+        bitrix
+    };
 
-    println!(
-        "Doctor:     {} (bitrix_id={})",
-        target.doctor_name, target.doctor_bitrix_id
-    );
+    let target = client
+        .resolve_target(bitrix_id, &city_slug, specialty.as_deref(), &services)
+        .await
+        .context("failed to resolve doctor; check INVITRO_DOCTOR_BITRIX_ID / INVITRO_DOCTOR_NAME / INVITRO_CITY_SLUG / INVITRO_SPECIALTY_SLUG")?;
+
+    if doctor_name.is_none() {
+        println!(
+            "Doctor:     {} (bitrix_id={})",
+            target.doctor_name, target.doctor_bitrix_id
+        );
+    }
     println!("City:       {} ({})", target.city.name, target.city.slug);
     println!("Specialty:  {}", target.specialty_name);
     println!("UUID:       {}", target.doctor_uuid);
