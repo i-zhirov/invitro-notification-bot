@@ -15,9 +15,18 @@ impl Telegram {
         if chat_ids.is_empty() {
             anyhow::bail!("no Telegram chat ids configured");
         }
-        let http = reqwest::Client::builder()
-            .build()
-            .context("failed to build HTTP client")?;
+        let mut builder = reqwest::Client::builder();
+        // Optional outbound proxy for networks where api.telegram.org is
+        // blocked, e.g. INVITRO_HTTPS_PROXY=socks5h://127.0.0.1:1080
+        if let Ok(proxy) = std::env::var("INVITRO_HTTPS_PROXY") {
+            if !proxy.is_empty() {
+                builder = builder.proxy(
+                    reqwest::Proxy::all(&proxy)
+                        .with_context(|| format!("invalid INVITRO_HTTPS_PROXY: {proxy}"))?,
+                );
+            }
+        }
+        let http = builder.build().context("failed to build HTTP client")?;
         Ok(Telegram {
             http,
             token: token.to_string(),
